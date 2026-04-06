@@ -6,6 +6,11 @@ import httpx
 from typing import Any
 
 
+# VictoriaTraces exposes the Jaeger API under /select/jaeger/api/.
+# This prefix is required — plain /api/* only works with standalone Jaeger.
+_API_PREFIX = "/select/jaeger/api"
+
+
 class TracesClient:
     """Client for VictoriaTraces/Jaeger trace query APIs."""
 
@@ -39,18 +44,17 @@ class TracesClient:
         if max_duration:
             params["maxDuration"] = max_duration
         if tags:
-            # Jaeger expects tags as JSON string
             import json
             params["tags"] = json.dumps(tags)
 
-        resp = await self._client.get("/api/traces", params=params)
+        resp = await self._client.get(f"{_API_PREFIX}/traces", params=params)
         resp.raise_for_status()
         data = resp.json()
         return data.get("data", [])
 
     async def trace_by_id(self, trace_id: str) -> dict[str, Any]:
         """Get a specific trace by ID."""
-        resp = await self._client.get(f"/api/traces/{trace_id}")
+        resp = await self._client.get(f"{_API_PREFIX}/traces/{trace_id}")
         resp.raise_for_status()
         data = resp.json()
         traces = data.get("data", [])
@@ -58,14 +62,14 @@ class TracesClient:
 
     async def services(self) -> list[str]:
         """List all known service names."""
-        resp = await self._client.get("/api/services")
+        resp = await self._client.get(f"{_API_PREFIX}/services")
         resp.raise_for_status()
         data = resp.json()
         return data.get("data", [])
 
     async def operations(self, service: str) -> list[str]:
         """List operations for a service."""
-        resp = await self._client.get(f"/api/services/{service}/operations")
+        resp = await self._client.get(f"{_API_PREFIX}/services/{service}/operations")
         resp.raise_for_status()
         data = resp.json()
         return data.get("data", [])
@@ -75,7 +79,7 @@ class TracesClient:
         params = {}
         if end_ts:
             params["endTs"] = end_ts
-        resp = await self._client.get("/api/dependencies", params=params)
+        resp = await self._client.get(f"{_API_PREFIX}/dependencies", params=params)
         resp.raise_for_status()
         data = resp.json()
         return data.get("data", [])
