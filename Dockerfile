@@ -11,8 +11,8 @@ FROM python:3.12-slim AS builder
 WORKDIR /src
 
 # Copy SDK first — install it so the plugin can reference "mirastack-sdk"
-COPY sdk/oss/mirastack-sdk-python/ sdk/oss/mirastack-sdk-python/
-RUN pip install --no-cache-dir sdk/oss/mirastack-sdk-python/
+COPY sdk/oss/agent-sdk/mirastack-agents-sdk-python/ sdk/oss/agent-sdk/mirastack-agents-sdk-python/
+RUN pip install --no-cache-dir sdk/oss/agent-sdk/mirastack-agents-sdk-python/
 
 # Copy plugin and install it
 COPY agents/oss/mirastack-plugin-query-vtraces-python/ agents/oss/mirastack-plugin-query-vtraces-python/

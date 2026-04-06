@@ -6,6 +6,7 @@ import json
 import os
 
 from mirastack_sdk import (
+    Action,
     ConfigParam,
     Plugin,
     PluginInfo,
@@ -15,6 +16,8 @@ from mirastack_sdk import (
     DevOpsStage,
     ExecuteRequest,
     ExecuteResponse,
+    respond_map,
+    respond_error,
     serve,
 )
 from mirastack_sdk.datetimeutils import format_epoch_micros, format_epoch_millis, format_lookback_millis
@@ -39,59 +42,85 @@ class QueryTracesPlugin(Plugin):
             description="Query VictoriaTraces/Jaeger for distributed traces",
             permissions=[Permission.READ],
             devops_stages=[DevOpsStage.OBSERVE],
+            actions=[
+                Action(
+                    id="search",
+                    description="Search for traces by service, operation, tags, and time range",
+                    permission=Permission.READ,
+                    stages=[DevOpsStage.OBSERVE],
+                    input_params=[
+                        ParamSchema(name="service", type="string", required=False, description="Service name filter"),
+                        ParamSchema(name="operation", type="string", required=False, description="Operation name filter"),
+                        ParamSchema(name="start", type="string", required=False, description="Start time"),
+                        ParamSchema(name="end", type="string", required=False, description="End time"),
+                        ParamSchema(name="limit", type="string", required=False, description="Max results (default 20)"),
+                        ParamSchema(name="min_duration", type="string", required=False, description="Minimum span duration (e.g., 100ms)"),
+                        ParamSchema(name="max_duration", type="string", required=False, description="Maximum span duration"),
+                        ParamSchema(name="tags", type="string", required=False, description="JSON object of tag filters"),
+                    ],
+                    output_params=[ParamSchema(name="result", type="json", required=True, description="Matching traces")],
+                ),
+                Action(
+                    id="trace_by_id",
+                    description="Retrieve a single trace by its trace ID",
+                    permission=Permission.READ,
+                    stages=[DevOpsStage.OBSERVE],
+                    input_params=[
+                        ParamSchema(name="trace_id", type="string", required=True, description="Trace ID"),
+                    ],
+                    output_params=[ParamSchema(name="result", type="json", required=True, description="Full trace")],
+                ),
+                Action(
+                    id="services",
+                    description="List all services emitting traces",
+                    permission=Permission.READ,
+                    stages=[DevOpsStage.OBSERVE],
+                    output_params=[ParamSchema(name="result", type="json", required=True, description="Service names")],
+                ),
+                Action(
+                    id="operations",
+                    description="List operations for a specific service",
+                    permission=Permission.READ,
+                    stages=[DevOpsStage.OBSERVE],
+                    input_params=[
+                        ParamSchema(name="service", type="string", required=True, description="Service name"),
+                    ],
+                    output_params=[ParamSchema(name="result", type="json", required=True, description="Operation names")],
+                ),
+                Action(
+                    id="dependencies",
+                    description="Get service dependency graph from traces",
+                    permission=Permission.READ,
+                    stages=[DevOpsStage.OBSERVE],
+                    input_params=[
+                        ParamSchema(name="end", type="string", required=False, description="End time"),
+                    ],
+                    output_params=[ParamSchema(name="result", type="json", required=True, description="Service dependencies")],
+                ),
+            ],
             config_params=[
                 ConfigParam(key="traces_url", type="string", required=True, description="VictoriaTraces base URL (e.g. http://victoriatraces:9411)"),
             ],
         )
 
     def schema(self) -> PluginSchema:
-        return PluginSchema(
-            input_params=[
-                ParamSchema(name="action", type="string", required=True,
-                            description="One of: search, trace_by_id, services, operations, dependencies"),
-                ParamSchema(name="trace_id", type="string", required=False,
-                            description="Trace ID for trace_by_id action"),
-                ParamSchema(name="service", type="string", required=False,
-                            description="Service name filter"),
-                ParamSchema(name="operation", type="string", required=False,
-                            description="Operation name filter"),
-                ParamSchema(name="start", type="string", required=False,
-                            description="Start time"),
-                ParamSchema(name="end", type="string", required=False,
-                            description="End time"),
-                ParamSchema(name="limit", type="string", required=False,
-                            description="Max results (default 20)"),
-                ParamSchema(name="min_duration", type="string", required=False,
-                            description="Minimum span duration (e.g., 100ms)"),
-                ParamSchema(name="max_duration", type="string", required=False,
-                            description="Maximum span duration"),
-                ParamSchema(name="tags", type="string", required=False,
-                            description="JSON object of tag filters"),
-            ],
-            output_params=[
-                ParamSchema(name="result", type="json", required=True,
-                            description="Query result as JSON"),
-            ],
-        )
+        info = self.info()
+        return PluginSchema(actions=info.actions)
 
     async def execute(self, req: ExecuteRequest) -> ExecuteResponse:
         if self._client is None:
-            return ExecuteResponse(
-                output={"error": "traces_url not configured — set MIRASTACK_TRACES_URL or push config via engine"},
-                logs=["ERROR: no traces client configured"],
-            )
+            resp = respond_error("traces_url not configured — set MIRASTACK_TRACES_URL or push config via engine")
+            resp.logs = ["ERROR: no traces client configured"]
+            return resp
 
-        action = req.params.get("action", "")
+        action = req.action_id or req.params.get("action", "")
         try:
             result = await self._dispatch(action, req.params, req.time_range)
-            return ExecuteResponse(
-                output={"result": json.dumps(result, default=str)},
-            )
+            return respond_map({"result": result})
         except Exception as e:
-            return ExecuteResponse(
-                output={"error": str(e)},
-                logs=[f"ERROR: {e}"],
-            )
+            resp = respond_error(str(e))
+            resp.logs = [f"ERROR: {e}"]
+            return resp
 
     async def _dispatch(self, action: str, params: dict, tr: TimeRange | None = None) -> dict | list:
         match action:
