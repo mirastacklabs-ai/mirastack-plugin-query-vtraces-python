@@ -1,0 +1,23 @@
+# Build / dist
+dist/
+build/
+*.egg-info/
+*.whl
+
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.hypothesis/
+htmlcov/
+.coverage
+
+# Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+
