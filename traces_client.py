@@ -74,11 +74,18 @@ class TracesClient:
         data = resp.json()
         return data.get("data", [])
 
-    async def dependencies(self, end_ts: str | None = None) -> list[dict[str, Any]]:
-        """Get service dependency graph."""
+    async def dependencies(self, end_ts: str | None = None, lookback: str | None = None) -> list[dict[str, Any]]:
+        """Get service dependency graph.
+
+        Args:
+            end_ts: End timestamp in epoch milliseconds.
+            lookback: Lookback window in milliseconds from end_ts.
+        """
         params = {}
         if end_ts:
             params["endTs"] = end_ts
+        if lookback:
+            params["lookback"] = lookback
         resp = await self._client.get(f"{_API_PREFIX}/dependencies", params=params)
         resp.raise_for_status()
         data = resp.json()

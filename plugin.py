@@ -8,43 +8,6 @@ import os
 from mirastack_sdk import (
     Action,
     ConfigParam,
-    Plugin,
-    PluginInfo,
-    PluginSchema,
-    ParamSchema,
-    Permission,
-    DevOpsStage,
-    ExecuteRequest,
-    ExecuteResponse,
-    respond_map,
-    respond_error,
-    serve,
-)
-from mirastack_sdk.datetimeutils import format_epoch_micros, format_epoch_millis, format_lookback_millis
-from mirastack_sdk.plugin import TimeRange
-from traces_client import TracesClient
-
-
-class QueryTracesPlugin(Plugin):
-    """Plugin for querying VictoriaTraces/Jaeger trace stores."""
-
-    def __init__(self):
-        self._client: TracesClient | None = None
-        # Bootstrap from env var; engine pushes runtime config via config_updated()
-        url = os.environ.get("MIRASTACK_TRACES_URL", "")
-        if url:
-            self._client = TracesClient(url)
-
-"""MIRASTACK query_traces plugin — queries VictoriaTraces/Jaeger."""
-
-from __future__ import annotations
-
-import json
-import os
-
-from mirastack_sdk import (
-    Action,
-    ConfigParam,
     IntentPattern,
     Plugin,
     PluginInfo,
@@ -62,7 +25,6 @@ from mirastack_sdk import (
 from mirastack_sdk.datetimeutils import format_epoch_micros, format_epoch_millis, format_lookback_millis
 from mirastack_sdk.plugin import TimeRange
 from traces_client import TracesClient
-from output import enrich_traces_output
 from output import enrich_traces_output
 
 
