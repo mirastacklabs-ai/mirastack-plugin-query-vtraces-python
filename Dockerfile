@@ -1,6 +1,4 @@
 # MIRASTACK Plugin — Query VTraces Python (multi-arch: linux/amd64, linux/arm64)
-# Build context must be the monorepo root (mirastack/)
-# so the local Python SDK is available.
 #
 # Build:
 #   docker buildx build --platform linux/amd64,linux/arm64 \
@@ -10,11 +8,7 @@ FROM python:3.12-slim AS builder
 
 WORKDIR /src
 
-# Copy SDK first — install it so the plugin can reference "mirastack-sdk"
-COPY sdk/oss/agent-sdk/mirastack-agents-sdk-python/ sdk/oss/agent-sdk/mirastack-agents-sdk-python/
-RUN pip install --no-cache-dir sdk/oss/agent-sdk/mirastack-agents-sdk-python/
-
-# Copy plugin and install it
+# Copy plugin and install it (SDK is fetched from upstream automatically)
 COPY agents/oss/mirastack-plugin-query-vtraces-python/ agents/oss/mirastack-plugin-query-vtraces-python/
 RUN pip install --no-cache-dir agents/oss/mirastack-plugin-query-vtraces-python/
 
