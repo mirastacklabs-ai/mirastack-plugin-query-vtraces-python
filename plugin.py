@@ -184,7 +184,7 @@ class QueryTracesPlugin(Plugin):
                 ),
             ],
             config_params=[
-                ConfigParam(key="traces_url", type="string", required=True, description="VictoriaTraces base URL (e.g. http://victoriatraces:9411)"),
+                ConfigParam(key="traces_url", type="string", required=True, description="VictoriaTraces base URL (e.g. http://victoriatraces:10428)"),
             ],
         )
 

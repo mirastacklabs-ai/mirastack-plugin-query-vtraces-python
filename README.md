@@ -17,7 +17,7 @@ Python plugin for querying **VictoriaTraces / Jaeger** from MIRASTACK workflows.
 Configure the VictoriaTraces URL via MIRASTACK settings:
 
 ```bash
-miractl config set victoriatraces.url http://victoriatraces:9411
+miractl config set victoriatraces.url http://victoriatraces:10428
 ```
 
 ## Example Workflow Step
