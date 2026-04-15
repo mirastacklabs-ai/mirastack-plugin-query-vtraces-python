@@ -1,0 +1,1182 @@
+openapi: 3.0.3
+info:
+  title: VictoriaTraces API
+  version: 0.1.0
+  description: "VictoriaTraces OpenAPI spec. All example responses are based on actual Go implementation."
+servers:
+  - url: http://localhost:10428
+    description: Local default server used by `victoria-traces`
+
+tags:
+  - name: Ingest
+    description: OTLP ingestion endpoints
+  - name: Jaeger
+    description: Jaeger-compatible query endpoints
+  - name: LogSQL
+    description: LogsQL / Log queries (used for trace query internals and UI)
+  - name: UI
+    description: Web UI endpoints
+  - name: Internal
+    description: Internal/admin endpoints (authKey required)
+
+paths:
+  /insert/opentelemetry/v1/traces:
+    post:
+      tags: [Ingest]
+      summary: Ingest OpenTelemetry traces (OTLP HTTP)
+      description: |
+        Accepts OTLP ExportTraceServiceRequest in either protobuf (application/x-protobuf) or JSON (application/json) encoding.
+        See `app/vtinsert/opentelemetry/otlphttp.go` for details.
+      parameters:
+        - $ref: '#/components/parameters/AccountID'
+        - $ref: '#/components/parameters/ProjectID'
+        - name: _time_field
+          in: query
+          schema:
+            type: array
+            items:
+              type: string
+          description: "Optional array of time fields (alias: VT-Time-Field header)"
+        - name: _msg_field
+          in: query
+          schema:
+            type: array
+            items:
+              type: string
+          description: "Optional message fields (alias: VT-Msg-Field header)"
+        - name: _stream_fields
+          in: query
+          schema:
+            type: array
+            items:
+              type: string
+          description: "Optional stream fields"
+        - name: extra_fields
+          in: query
+          schema:
+            type: array
+            items:
+              type: string
+          description: "Additional stream fields in the form field=value"
+        - name: debug
+          in: query
+          schema:
+            type: boolean
+          description: "Debug flag that logs request details on server side"
+      requestBody:
+        required: true
+        content:
+          application/x-protobuf:
+            schema:
+              type: string
+              format: binary
+            description: |
+              Protobuf-encoded otel.proto.TraceService.Export (ExportTraceServiceRequest).
+              Example: use the OTLP protobuf binary payload. Example curl (sending file):
+
+                curl -v -X POST "http://localhost:10428/insert/opentelemetry/v1/traces" \
+                  -H "Content-Type: application/x-protobuf" --data-binary @export_trace.bin
+
+          application/json:
+            schema:
+              type: object
+            description: "OTLP JSON representation of ExportTraceServiceRequest"
+            examples:
+              otlp-json:
+                summary: Minimal OTLP JSON ExportTraceServiceRequest
+                value:
+                  resourceSpans:
+                    - resource:
+                        attributes:
+                          - key: service.name
+                            value:
+                              stringValue: orders-service
+                      scopeSpans:
+                        - scope:
+                            name: example-instrumentation
+                          spans:
+                            - traceId: "0af7651916cd43dd8448eb211c80319c"
+                              spanId: "b9c7c989f97918e1"
+                              name: "GET /api/order"
+                              kind: "SPAN_KIND_SERVER"
+                              startTimeUnixNano: "1638854400000000000"
+                              endTimeUnixNano: "1638854400001000000"
+                              attributes:
+                                - key: http.method
+                                  value:
+                                    stringValue: GET
+                                - key: http.status_code
+                                  value:
+                                    intValue: 200
+      responses:
+        '200':
+          description: OK (empty body on success)
+          content:
+            application/json:
+              examples:
+                success:
+                  summary: Empty success response
+                  value: {}
+        '400':
+          description: Bad request
+          content:
+            application/json:
+              examples:
+                bad-request:
+                  summary: Invalid OTLP JSON
+                  value:
+                    error: "cannot unmarshal request: unexpected end of JSON input"
+        '500':
+          description: Server error
+          content:
+            application/json:
+              examples:
+                server-error:
+                  summary: Internal processing error
+                  value:
+                    error: "internal error processing request"
+
+
+  /insert/ready:
+    get:
+      tags: [Ingest]
+      summary: Readiness probe for insert service
+      responses:
+        '200':
+          description: Service ready
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: ok
+
+  /select/vmui/:
+    get:
+      tags: [UI]
+      summary: VictoriaTraces web UI entrypoint (serves static app)
+      responses:
+        '200':
+          description: UI HTML
+          content:
+            text/html:
+              schema:
+                type: string
+
+  /select/jaeger/api/services:
+    get:
+      tags: [Jaeger]
+      summary: Get list of service names
+      parameters:
+        - $ref: '#/components/parameters/AccountID'
+        - $ref: '#/components/parameters/ProjectID'
+      responses:
+        '200':
+          description: Service list
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ServiceListResponse'
+              examples:
+                services-example:
+                  summary: Example services list
+                  value:
+                    data: ["orders-service", "payment-service"]
+                    errors: null
+                    limit: 2
+                    offset: 0
+                    total: 2
+                error-example:
+                  summary: Error response
+                  value:
+                    data: []
+                    errors:
+                      - code: 500
+                        msg: "cannot get services list: database unavailable"
+                    limit: 0
+                    offset: 0
+                    total: 0
+
+
+  /select/jaeger/api/services/{serviceName}/operations:
+    get:
+      tags: [Jaeger]
+      summary: Get operations for a service
+      parameters:
+        - name: serviceName
+          in: path
+          required: true
+          schema:
+            type: string
+        - $ref: '#/components/parameters/AccountID'
+        - $ref: '#/components/parameters/ProjectID'
+      responses:
+        '200':
+          description: Operations list
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationListResponse'
+              examples:
+                operations-example:
+                  summary: Example operation list
+                  value:
+                    data: ["GET /api/order", "POST /api/charge"]
+                    errors: null
+                    limit: 2
+                    offset: 0
+                    total: 2
+                error-example:
+                  summary: Error response
+                  value:
+                    data: []
+                    errors:
+                      - code: 400
+                        msg: "incorrect query path [/select/jaeger/api/services/operations]"
+                    limit: 0
+                    offset: 0
+                    total: 0
+
+
+  /select/jaeger/api/traces:
+    get:
+      tags: [Jaeger]
+      summary: Search for traces (Jaeger-compatible API)
+      parameters:
+        - name: service
+          in: query
+          required: true
+          schema:
+            type: string
+          description: Service name (required)
+          example: orders-service
+        - name: operation
+          in: query
+          schema:
+            type: string
+          description: Operation/span name
+          example: "GET /api/order"
+        - name: minDuration
+          in: query
+          schema:
+            type: string
+          description: Minimum duration (e.g. "100ms")
+        - name: maxDuration
+          in: query
+          schema:
+            type: string
+          description: Maximum duration
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 20
+          example: 10
+        - name: start
+          in: query
+          schema:
+            type: string
+          description: Start time in unix microseconds (see implementation expects unix microseconds)
+        - name: end
+          in: query
+          schema:
+            type: string
+          description: End time in unix microseconds
+        - name: tags
+          in: query
+          schema:
+            type: string
+          description: "JSON-encoded tags object. Example: '{\"http.status_code\":\"500\"}'"
+        - $ref: '#/components/parameters/AccountID'
+        - $ref: '#/components/parameters/ProjectID'
+      responses:
+        '200':
+          description: "Traces list"
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TracesResponse'
+              examples:
+                traces-example:
+                  summary: Example traces response (one trace)
+                  value:
+                    data:
+                      - processes:
+                          p1:
+                            serviceName: orders-service
+                            tags: []
+                        spans:
+                          - traceID: "0af7651916cd43dd8448eb211c80319c"
+                            spanID: "b9c7c989f97918e1"
+                            operationName: "GET /api/order"
+                            startTime: 1638854400000000
+                            duration: 1000000
+                            tags:
+                              - key: http.method
+                                vStr: GET
+                            logs: []
+                            processID: p1
+                    errors: null
+                    limit: 1
+                    offset: 0
+                    total: 1
+                error-example:
+                  summary: Error response
+                  value:
+                    data: []
+                    errors:
+                      - code: 500
+                        msg: "get trace list error: database unavailable"
+                    limit: 0
+                    offset: 0
+                    total: 0
+
+
+  /select/jaeger/api/traces/{traceID}:
+    get:
+      tags: [Jaeger]
+      summary: Get a single trace by traceID
+      parameters:
+        - name: traceID
+          in: path
+          required: true
+          schema:
+            type: string
+        - $ref: '#/components/parameters/AccountID'
+        - $ref: '#/components/parameters/ProjectID'
+      responses:
+        '200':
+          description: "Trace detail"
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TraceResponse'
+              examples:
+                single-trace:
+                  summary: Single trace example
+                  value:
+                    data:
+                      - processes:
+                          p1:
+                            serviceName: orders-service
+                            tags: []
+                        spans:
+                          - traceID: "0af7651916cd43dd8448eb211c80319c"
+                            spanID: "b9c7c989f97918e1"
+                            operationName: "GET /api/order"
+                            startTime: 1638854400000000
+                            duration: 1000000
+                            tags:
+                              - key: http.method
+                                vStr: GET
+                            logs: []
+                            processID: p1
+                    errors: null
+                    limit: 1
+                    offset: 0
+                    total: 1
+                not-found:
+                  summary: Trace not found
+                  value:
+                    data: []
+                    errors:
+                      - code: 404
+                        msg: "trace not found"
+                    limit: 0
+                    offset: 0
+                    total: 0
+        '404':
+          description: "Trace not found"
+          content:
+            application/json:
+              examples:
+                not-found:
+                  value:
+                    data: []
+                    errors:
+                      - code: 404
+                        msg: "trace not found"
+                    limit: 0
+                    offset: 0
+                    total: 0
+
+
+  /select/jaeger/api/dependencies:
+    get:
+      tags: [Jaeger]
+      summary: Get service dependencies graph (Jaeger-like /api/dependencies)
+      parameters:
+        - name: endTs
+          in: query
+          schema:
+            type: integer
+          description: "End timestamp in milliseconds since epoch"
+        - name: lookback
+          in: query
+          schema:
+            type: string
+          description: "Lookback duration string, e.g. \"1h\" (defaults to 1h)"
+        - $ref: '#/components/parameters/AccountID'
+        - $ref: '#/components/parameters/ProjectID'
+      responses:
+        '200':
+          description: Dependencies
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DependenciesResponse'
+              examples:
+                deps-example:
+                  summary: Example dependencies response
+                  value:
+                    data:
+                      - parent: orders-service
+                        child: inventory-service
+                        callCount: 42
+                      - parent: orders-service
+                        child: payment-service
+                        callCount: 10
+                    errors: null
+                    limit: 2
+                    offset: 0
+                    total: 2
+                error-example:
+                  summary: Error response
+                  value:
+                    data: []
+                    errors:
+                      - code: 500
+                        msg: "get dependencies error: database unavailable"
+                    limit: 0
+                    offset: 0
+                    total: 0
+
+
+  /select/logsql/query:
+    get:
+      tags: [LogSQL]
+      summary: Execute LogsQL query (used by UI and internal traces queries)
+      parameters:
+        - name: query
+          in: query
+          required: true
+          schema:
+            type: string
+          description: "LogsQL query string"
+          example: "* | limit 10"
+        - name: start
+          in: query
+          schema:
+            type: string
+          description: Start time (RFC3339 or other supported formats)
+        - name: end
+          in: query
+          schema:
+            type: string
+          description: End time
+        - $ref: '#/components/parameters/AccountID'
+        - $ref: '#/components/parameters/ProjectID'
+      responses:
+        '200':
+          description: Query results as JSON rows
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LogQueryResponse'
+              examples:
+                logsql-example:
+                  summary: Example LogsQL query response
+                  value:
+                    data:
+                      - _time: "2025-12-26T12:00:00Z"
+                        message: "Order received: id=123"
+                      - _time: "2025-12-26T12:00:01Z"
+                        message: "Order processed: id=123"
+                    errors: null
+                    limit: 2
+                    offset: 0
+                    total: 2
+                error-example:
+                  summary: Error response
+                  value:
+                    data: []
+                    errors:
+                      - code: 400
+                        msg: "cannot execute query [* | limit 10]: syntax error at position 5"
+                    limit: 0
+                    offset: 0
+                    total: 0
+
+  /select/logsql/facets:
+    get:
+      tags: [LogSQL]
+      summary: Get facets for a query (field -> {value,hits})
+      parameters:
+        - name: query
+          in: query
+          required: true
+          schema:
+            type: string
+          description: LogsQL query string
+        - name: limit
+          in: query
+          schema:
+            type: integer
+          description: Maximum number of fields to return
+        - name: max_values_per_field
+          in: query
+          schema:
+            type: integer
+          description: Max values per field
+        - name: max_value_len
+          in: query
+          schema:
+            type: integer
+          description: Max length of field values
+        - name: keep_const_fields
+          in: query
+          schema:
+            type: boolean
+          description: Whether to keep constant fields
+        - $ref: '#/components/parameters/AccountID'
+        - $ref: '#/components/parameters/ProjectID'
+      responses:
+        '200':
+          description: Facets response
+          content:
+            application/json:
+              examples:
+                facets-example:
+                  summary: Example facets response
+                  value:
+                    data:
+                      http.method:
+                        - value: "GET"
+                          hits: "100"
+                        - value: "POST"
+                          hits: "23"
+                      http.status_code:
+                        - value: "200"
+                          hits: "110"
+                        - value: "500"
+                          hits: "13"
+                    errors: null
+                    limit: 2
+                    offset: 0
+                    total: 2
+                error-example:
+                  summary: Error response
+                  value:
+                    data: []
+                    errors:
+                      - code: 400
+                        msg: "missing 'query' parameter"
+                    limit: 0
+                    offset: 0
+                    total: 0
+
+  /select/logsql/hits:
+    get:
+      tags: [LogSQL]
+      summary: Get hits time series for query and fields
+      parameters:
+        - name: query
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: step
+          in: query
+          schema:
+            type: string
+          description: Time bucket step (e.g., "1m")
+        - name: offset
+          in: query
+          schema:
+            type: string
+          description: Offset for bucketing
+        - name: field
+          in: query
+          schema:
+            type: array
+            items:
+              type: string
+          description: Field(s) to group hits by
+        - name: fields_limit
+          in: query
+          schema:
+            type: integer
+          description: Number of top fields to return
+        - $ref: '#/components/parameters/AccountID'
+        - $ref: '#/components/parameters/ProjectID'
+      responses:
+        '200':
+          description: Hits time series response
+          content:
+            application/json:
+              examples:
+                hits-example:
+                  summary: Example hits response
+                  value:
+                    data:
+                      "{}":
+                        timestamps: ["2025-12-26T12:00:00Z", "2025-12-26T12:01:00Z"]
+                        hits: [10, 12]
+                        hitsTotal: 22
+                    errors: null
+                    limit: 0
+                    offset: 0
+                    total: 1
+
+  /select/logsql/field_names:
+    get:
+      tags: [LogSQL]
+      summary: List field names for a query
+      parameters:
+        - name: query
+          in: query
+          required: true
+          schema:
+            type: string
+        - $ref: '#/components/parameters/AccountID'
+        - $ref: '#/components/parameters/ProjectID'
+      responses:
+        '200':
+          description: Field names list
+          content:
+            application/json:
+              examples:
+                field-names-example:
+                  summary: Example field names
+                  value:
+                    data: ["http.method", "http.status_code", "_msg"]
+                    errors: null
+                    limit: 0
+                    offset: 0
+                    total: 3
+
+  /select/logsql/field_values:
+    get:
+      tags: [LogSQL]
+      summary: List values for a field
+      parameters:
+        - name: field
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: limit
+          in: query
+          schema:
+            type: integer
+        - $ref: '#/components/parameters/AccountID'
+        - $ref: '#/components/parameters/ProjectID'
+      responses:
+        '200':
+          description: Field values list
+          content:
+            application/json:
+              examples:
+                field-values-example:
+                  summary: Example field values
+                  value:
+                    data:
+                      - value: "GET"
+                        hits: "100"
+                      - value: "POST"
+                        hits: "23"
+                    errors: null
+                    limit: 0
+                    offset: 0
+                    total: 2
+
+  /select/logsql/streams:
+    get:
+      tags: [LogSQL]
+      summary: List streams matching a query
+      parameters:
+        - name: query
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: limit
+          in: query
+          schema:
+            type: integer
+        - $ref: '#/components/parameters/AccountID'
+        - $ref: '#/components/parameters/ProjectID'
+      responses:
+        '200':
+          description: Streams list
+          content:
+            application/json:
+              examples:
+                streams-example:
+                  summary: Example streams response
+                  value:
+                    data:
+                      - _stream: "{service=orders-service,host=host1}"
+                        _rows: 123
+                      - _stream: "{service=orders-service,host=host2}"
+                        _rows: 45
+                    errors: null
+                    limit: 0
+                    offset: 0
+                    total: 2
+
+  /select/logsql/stream_field_names:
+    get:
+      tags: [LogSQL]
+      summary: List field names for streams
+      parameters:
+        - name: query
+          in: query
+          required: true
+          schema:
+            type: string
+        - $ref: '#/components/parameters/AccountID'
+        - $ref: '#/components/parameters/ProjectID'
+      responses:
+        '200':
+          description: Stream field names list
+          content:
+            application/json:
+              examples:
+                stream-field-names-example:
+                  summary: Example stream field names
+                  value:
+                    data: ["service", "host", "app_name"]
+                    errors: null
+                    limit: 0
+                    offset: 0
+                    total: 3
+
+  /select/logsql/stream_field_values:
+    get:
+      tags: [LogSQL]
+      summary: List values for a stream-level field
+      parameters:
+        - name: field
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: limit
+          in: query
+          schema:
+            type: integer
+        - $ref: '#/components/parameters/AccountID'
+        - $ref: '#/components/parameters/ProjectID'
+      responses:
+        '200':
+          description: Stream field values list
+          content:
+            application/json:
+              examples:
+                stream-field-values-example:
+                  summary: Example stream field values
+                  value:
+                    data:
+                      - value: "host1"
+                        hits: "70"
+                      - value: "host2"
+                        hits: "30"
+                    errors: null
+                    limit: 0
+                    offset: 0
+                    total: 2
+
+  /select/logsql/stream_ids:
+    get:
+      tags: [LogSQL]
+      summary: Get stream ids for a query
+      parameters:
+        - name: query
+          in: query
+          required: true
+          schema:
+            type: string
+        - $ref: '#/components/parameters/AccountID'
+        - $ref: '#/components/parameters/ProjectID'
+      responses:
+        '200':
+          description: Stream ids
+          content:
+            application/json:
+              examples:
+                stream-ids-example:
+                  summary: Example stream ids
+                  value:
+                    data: ["s1", "s2", "s3"]
+                    errors: null
+                    limit: 0
+                    offset: 0
+                    total: 3
+
+  /select/logsql/tail:
+    get:
+      tags: [LogSQL]
+      summary: Live tail logs (streaming)
+      description: |
+        Streams log rows matching the query as NDJSON (newline-delimited JSON). Each line is a JSON object representing a log row. See [VictoriaLogs live tailing docs](https://docs.victoriametrics.com/victorialogs/querying/#live-tailing).
+      parameters:
+        - name: query
+          in: query
+          required: true
+          schema:
+            type: string
+          description: LogsQL query string
+        - name: refresh_interval
+          in: query
+          schema:
+            type: integer
+          description: Refresh interval in milliseconds (default: 1000)
+        - name: start_offset
+          in: query
+          schema:
+            type: integer
+          description: How far back to start tailing (ms, default: 5000)
+        - name: offset
+          in: query
+          schema:
+            type: integer
+          description: Offset for bucketing (ms, default: 5000)
+        - $ref: '#/components/parameters/AccountID'
+        - $ref: '#/components/parameters/ProjectID'
+      responses:
+        '200':
+          description: NDJSON stream of log rows
+          content:
+            application/x-ndjson:
+              examples:
+                tail-example:
+                  summary: Example NDJSON stream
+                  value: |
+                    {"_time":"2025-12-26T12:00:00Z","message":"Order received: id=123"}
+                    {"_time":"2025-12-26T12:00:01Z","message":"Order processed: id=123"}
+
+  /select/logsql/query_time_range:
+    get:
+      tags: [LogSQL]
+      summary: Get actual time range for a query
+      description: |
+        Returns the actual time range selected by the query, as RFC3339Nano timestamps. Useful for UI time range display.
+      parameters:
+        - name: query
+          in: query
+          required: true
+          schema:
+            type: string
+          description: LogsQL query string
+        - $ref: '#/components/parameters/AccountID'
+        - $ref: '#/components/parameters/ProjectID'
+      responses:
+        '200':
+          description: Time range for query
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  start:
+                    type: string
+                    format: date-time
+                  end:
+                    type: string
+                    format: date-time
+              examples:
+                time-range-example:
+                  summary: Example time range
+                  value:
+                    start: "2025-12-26T12:00:00Z"
+                    end: "2025-12-26T12:05:00Z"
+
+  /select/logsql/stats_query:
+    get:
+      tags: [LogSQL]
+      summary: Execute a stats query (returns time series)
+      parameters:
+        - name: query
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: start
+          in: query
+          schema:
+            type: string
+        - name: end
+          in: query
+          schema:
+            type: string
+        - $ref: '#/components/parameters/AccountID'
+        - $ref: '#/components/parameters/ProjectID'
+      responses:
+        '200':
+          description: Stats query result
+          content:
+            application/json:
+              examples:
+                stats-example:
+                  summary: Example stats query response
+                  value:
+                    data:
+                      - timestamp: "2025-12-26T12:00:00Z"
+                        value: 10
+                      - timestamp: "2025-12-26T12:01:00Z"
+                        value: 12
+                    errors: null
+                    limit: 0
+                    offset: 0
+                    total: 2
+
+  /select/logsql/stats_query_range:
+    get:
+      tags: [LogSQL]
+      summary: Execute a range stats query
+      parameters:
+        - name: query
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: start
+          in: query
+          schema:
+            type: string
+        - name: end
+          in: query
+          schema:
+            type: string
+        - $ref: '#/components/parameters/AccountID'
+        - $ref: '#/components/parameters/ProjectID'
+      responses:
+        '200':
+          description: Stats range query result
+          content:
+            application/json:
+              examples:
+                stats-range-example:
+                  summary: Example stats range response
+                  value:
+                    data:
+                      - start: "2025-12-26T12:00:00Z"
+                        end: "2025-12-26T12:05:00Z"
+                        value: 123
+                    errors: null
+                    limit: 0
+                    offset: 0
+                    total: 1
+
+
+  /internal/partition/list:
+    get:
+      tags: [Internal]
+      summary: List local storage partitions (requires authKey)
+      parameters:
+        - name: authKey
+          in: query
+          schema:
+            type: string
+          description: Authorization key (see -partitionManageAuthKey)
+      responses:
+        '200':
+          description: JSON array of partition names
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: string
+
+components:
+  parameters:
+    AccountID:
+      name: AccountID
+      in: header
+      required: false
+      schema:
+        type: integer
+      description: Tenant account id (header). If omitted defaults to 0.
+    ProjectID:
+      name: ProjectID
+      in: header
+      required: false
+      schema:
+        type: integer
+      description: Tenant project id (header). If omitted defaults to 0.
+
+  schemas:
+    ServiceListResponse:
+      type: object
+      properties:
+        data:
+          type: array
+          items:
+            type: string
+        errors:
+          nullable: true
+          type: object
+        limit:
+          type: integer
+        offset:
+          type: integer
+        total:
+          type: integer
+
+    OperationListResponse:
+      type: object
+      properties:
+        data:
+          type: array
+          items:
+            type: string
+        errors:
+          nullable: true
+          type: object
+        limit:
+          type: integer
+        offset:
+          type: integer
+        total:
+          type: integer
+
+    TracesResponse:
+      type: object
+      properties:
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/Trace'
+        errors:
+          nullable: true
+          type: object
+        limit:
+          type: integer
+        offset:
+          type: integer
+        total:
+          type: integer
+
+    Trace:
+      type: object
+      properties:
+        processes:
+          type: object
+          additionalProperties:
+            $ref: '#/components/schemas/Process'
+        spans:
+          type: array
+          items:
+            $ref: '#/components/schemas/Span'
+
+    Process:
+      type: object
+      properties:
+        serviceName:
+          type: string
+        tags:
+          type: array
+          items:
+            $ref: '#/components/schemas/KeyValue'
+
+    Span:
+      type: object
+      properties:
+        traceID:
+          type: string
+        spanID:
+          type: string
+        operationName:
+          type: string
+        startTime:
+          type: integer
+          description: microseconds since epoch (as used in Jaeger output)
+        duration:
+          type: integer
+          description: microseconds
+        tags:
+          type: array
+          items:
+            $ref: '#/components/schemas/KeyValue'
+        logs:
+          type: array
+          items:
+            $ref: '#/components/schemas/SpanLog'
+        processID:
+          type: string
+
+    KeyValue:
+      type: object
+      properties:
+        key:
+          type: string
+        vStr:
+          type: string
+
+    SpanLog:
+      type: object
+      properties:
+        timestamp:
+          type: integer
+        fields:
+          type: array
+          items:
+            $ref: '#/components/schemas/KeyValue'
+
+    TraceResponse:
+      $ref: '#/components/schemas/TracesResponse'
+
+    DependenciesResponse:
+      type: object
+      properties:
+        data:
+          type: array
+          items:
+            type: object
+            properties:
+              parent:
+                type: string
+              child:
+                type: string
+              callCount:
+                type: integer
+        errors:
+          nullable: true
+          type: object
+        limit:
+          type: integer
+        offset:
+          type: integer
+        total:
+          type: integer
+
+    LogQueryResponse:
+      type: object
+      properties:
+        data:
+          type: array
+          items:
+            type: object
+            additionalProperties:
+              type: string
+        errors:
+          nullable: true
+          type: object
+        limit:
+          type: integer
+        offset:
+          type: integer
+        total:
+          type: integer
+
+security: []
+
+# Notes:
+# - This is a first-pass partial spec capturing main public endpoints used by UIs: ingestion (OTLP HTTP), Jaeger-compatible query API, and LogsQL query.
+# - Tenant identification is performed via headers AccountID and ProjectID (see app code logstorage.GetTenantIDFromRequest).
+# - Internal endpoints exist under /internal/* and require authKey query arg; include them if needed for administrative UI.
+# - OTLP protobuf schema is not embedded here; consumers using application/json can use generic object schema or embed OTLP proto JSON schema.

@@ -16,7 +16,7 @@ class TestEnrichTracesOutput(unittest.TestCase):
     def test_jaeger_data_counting(self):
         raw = json.dumps({"data": [{"traceID": "a"}, {"traceID": "b"}]})
         out = enrich_traces_output("search", raw)
-        self.assertEqual(out["result_count"], 2)
+        self.assertEqual(out["result_count"], "2")
 
     def test_services_found_extraction(self):
         raw = json.dumps({
@@ -38,7 +38,7 @@ class TestEnrichTracesOutput(unittest.TestCase):
     def test_truncation(self):
         long = "x" * (MAX_RESULT_LEN + 5000)
         out = enrich_traces_output("trace_by_id", long)
-        self.assertTrue(out["truncated"])
+        self.assertEqual(out["truncated"], "true")
         self.assertEqual(len(out["result"]), MAX_RESULT_LEN)
 
     def test_invalid_json_passes_through(self):
@@ -49,7 +49,7 @@ class TestEnrichTracesOutput(unittest.TestCase):
     def test_dict_input(self):
         data = {"data": [1, 2, 3]}
         out = enrich_traces_output("search", data)
-        self.assertEqual(out["result_count"], 3)
+        self.assertEqual(out["result_count"], "3")
 
 
 if __name__ == "__main__":
